@@ -1,0 +1,109 @@
+# =============================================================================
+# logger.py — Colored, prefixed logging for all devices
+# =============================================================================
+# Usage:
+#   from logger import get_logger
+#   log = get_logger("RADAR")
+#   log.info("Sending SPEED_DATA: 72 km/h")
+#   log.warning("No response from SG")
+#   log.error("Connection refused")
+# =============================================================================
+
+import logging
+import sys
+
+# ANSI color codes
+_COLORS = {
+    "SMART GATEWAY":    "\033[96m",   # Cyan
+    "CLOUD SERVER":     "\033[94m",   # Blue
+    "INDUCTIVE LOOP":   "\033[38;2;132;204;22m",   # Green
+    "RADAR":            "\033[38;2;168;85;247m",   # Yellow
+    "INCIDENT SENSOR":  "\033[38;2;223;142;29m",   # Red
+    "LED PANEL":        "\033[38;2;236;72;153m",   # Magenta
+    "TRAFFIC LIGHT":    "\033[33m",   # Orange-ish
+    "RUN ALL":          "\033[97m",   # White
+}
+
+_LEVEL_COLORS = {
+    "DEBUG":    "\033[37m",    # Light gray
+    "INFO":     "\033[0m",     # Reset (default)
+    "WARNING":  "\033[33m",    # Yellow
+    "ERROR":    "\033[31m",    # Red
+    "CRITICAL": "\033[41m",    # Red background
+}
+
+_RESET = "\033[0m"
+
+# Longest device name is "INCIDENT SENSOR" (15 chars) + 2 brackets = 17
+# We pad to 17 so every prefix occupies the same visual width
+_PREFIX_WIDTH = 17
+
+
+class _ColoredFormatter(logging.Formatter):
+    def __init__(self, device_name: str):
+        super().__init__()
+        self.device_name  = device_name
+        self.device_color = _COLORS.get(device_name.upper(), "\033[0m")
+
+    def format(self, record: logging.LogRecord) -> str:
+        level_color = _LEVEL_COLORS.get(record.levelname, "\033[0m")
+
+        # Fixed-width prefix: [DEVICE NAME]   ← padded to _PREFIX_WIDTH
+        label  = f"[{self.device_name.upper()}]"
+        prefix = f"{self.device_color}{label:<{_PREFIX_WIDTH}}{_RESET}"
+
+        level_tag = f"{level_color}{record.levelname:<8}{_RESET}"
+        message   = f"{level_color}{record.getMessage()}{_RESET}"
+        return f"{prefix} {level_tag} {message}"
+
+
+def get_logger(device_name: str, level: int = logging.DEBUG) -> logging.Logger:
+    """
+    Returns a logger prefixed and colored by device name.
+
+    Args:
+        device_name: Human-readable name shown in every log line.
+                     Should match one of the keys in _COLORS for best results.
+        level:       Logging level (default: DEBUG).
+    """
+    logger = logging.getLogger(device_name)
+
+    # Avoid duplicate handlers if get_logger is called more than once
+    if logger.handlers:
+        return logger
+
+    logger.setLevel(level)
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(level)
+    handler.setFormatter(_ColoredFormatter(device_name))
+
+    logger.addHandler(handler)
+    logger.propagate = False
+
+    return logger
+
+
+# =============================================================================
+# Quick demo — run this file directly to preview all device colors
+# =============================================================================
+if __name__ == "__main__":
+    devices = [
+        "Smart Gateway",
+        "Cloud Server",
+        "Inductive Loop",
+        "Radar",
+        "Incident Sensor",
+        "LED Panel",
+        "Traffic Light",
+        "Run All",
+    ]
+
+    print("\n--- Logger color preview ---\n")
+    for name in devices:
+        log = get_logger(name)
+        log.debug(f"DEBUG message from {name}")
+        log.info(f"INFO message from {name}")
+        log.warning(f"WARNING message from {name}")
+        log.error(f"ERROR message from {name}")
+        print()
