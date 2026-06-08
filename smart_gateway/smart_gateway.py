@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import socket
 import json
 import threading
+import time
 from datetime import datetime
 
 from logger import get_logger
@@ -36,7 +37,7 @@ def _build_message(method: str, payload: dict) -> bytes:
     }
     return json.dumps(msg).encode("utf-8")
 
-# UDP SERVER
+# UDP SERVER ------------------------------------------------------------
 
 def _handle_vehicle_count(payload: dict):
     global _vehicle_count
@@ -47,6 +48,7 @@ def _handle_vehicle_count(payload: dict):
         _vehicle_count = count
         _events_buffer.append({"method": "VEHICLE_COUNT", "data": payload})
     log.info(f"VEHICLE_COUNT → count={count}, interval={interval}s, location={location}")
+
  
 def _handle_speed_data(payload: dict):
     speed    = payload.get("speed_kmh", 0)
@@ -55,12 +57,10 @@ def _handle_speed_data(payload: dict):
         _speed_readings.append(speed)
         _events_buffer.append({"method": "SPEED_DATA", "data": payload})
     log.debug(f"SPEED_DATA    → speed={speed} km/h, location={location}") 
+
   
 def start_udp_server():
-    """
-    UDP server that receives VEHICLE_COUNT and SPEED_DATA messages.
-    Runs in a dedicated thread.
-    """
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((config.SG_HOST, config.SG_UDP_PORT))
     log.info(f"UDP server listening on {config.SG_HOST}:{config.SG_UDP_PORT}")
@@ -84,8 +84,8 @@ def start_udp_server():
         except Exception as e:
             log.error(f"UDP server error: {e}")
  
-
-# TCP SERVER
+ 
+# TCP SERVER ------------------------------------------------------------
 
 def _send_ack(conn, ref_method: str):
     response = _build_message("ACK", {
@@ -94,6 +94,7 @@ def _send_ack(conn, ref_method: str):
     })
     conn.sendall(response)
     log.info(f"ACK sent → ref_method={ref_method}")
+
 
 def _send_error(conn, ref_method: str, error_code: str, description: str):
     response = _build_message("ERROR", {
@@ -125,6 +126,7 @@ def _handle_incident_report(payload: dict) -> tuple[bool, str, str]:
     log.warning(f"INCIDENT_REPORT → type={incident_type}, severity={severity}, location={location}")
     return True, "", ""
 
+
 def handle_tcp_client(conn: socket.socket, addr):
     """
     Handles a single TCP client connection in its own thread.
@@ -153,6 +155,13 @@ def handle_tcp_client(conn: socket.socket, addr):
             ok, error_code, description = _handle_incident_report(payload)
             if ok:
                 _send_ack(conn, method)
+
+                send_multicast_alert({
+                    "alert_type": "incident",
+                    "level":      "high",
+                    "location":   payload.get("location", "unknown"),
+                    "action":     "ACTIVATE_SIGNAL",
+                })
             else:
                 _send_error(conn, method, error_code, description)
         else:
@@ -167,10 +176,7 @@ def handle_tcp_client(conn: socket.socket, addr):
  
  
 def start_tcp_server():
-    """
-    TCP server that accepts multiple clients, spawning a thread per connection.
-    Runs in a dedicated thread.
-    """
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((config.SG_HOST, config.SG_TCP_PORT))
@@ -191,16 +197,89 @@ def start_tcp_server():
             log.error(f"TCP server error: {e}")
  
 
+# TRAFFIC CLASSIFICATION
+def classify_traffic(vehicle_count: int, avg_speed: float) -> str | None:
+    """
+    Traffic classification logic based on vehicle count and average speed.
+ 
+    | Situation          | Count                         | Avg speed              | Level    |
+    |--------------------|-------------------------------|------------------------|----------|
+    | Severe congestion  | >  VEHICLE_COUNT_THRESHOLD    | <  SPEED_LOW_THRESHOLD | "high"   |
+    | Slow/intense flow  | >  VEHICLE_COUNT_THRESHOLD    | <  SPEED_MID_THRESHOLD | "medium" |
+    | Normal flow        | <= VEHICLE_COUNT_THRESHOLD    | >= SPEED_MID_THRESHOLD | None     |
+ 
+    """
+    if vehicle_count > config.VEHICLE_COUNT_THRESHOLD:
+        if avg_speed < config.SPEED_LOW_THRESHOLD:
+            return "high"
+        elif avg_speed < config.SPEED_MID_THRESHOLD:
+            return "medium"
+    return None
+ 
+
+def _classification_loop():
+    """
+    Runs every SENSOR_INTERVAL seconds.
+    Reads accumulated speed readings and vehicle count, classifies traffic,
+    and triggers a multicast alert if needed.
+    """
+    while True:
+        time.sleep(config.SENSOR_INTERVAL)
+ 
+        with _lock:
+            count    = _vehicle_count
+            readings = list(_speed_readings)
+            _speed_readings.clear()   # reset for next window
+ 
+        if not readings:
+            log.info("Classification → no speed data received in this window, skipping")
+            continue
+ 
+        avg_speed = sum(readings) / len(readings)
+        level     = classify_traffic(count, avg_speed)
+ 
+        log.info(
+            f"Classification → count={count}, "
+            f"avg_speed={avg_speed:.1f} km/h, "
+            f"readings={len(readings)}, "
+            f"level={level or 'normal (no alert)'}"
+        )
+ 
+        if level:
+            send_multicast_alert({
+                "alert_type":    "congestion",
+                "level":         level,
+                "location":      "BR101-km180",
+                "action":        "ACTIVATE_SIGNAL",
+                "avg_speed_kmh": round(avg_speed, 1),
+                "vehicle_count": count,
+            })
+
+
 # MULTICAST 
 
 def send_multicast_alert(payload: dict):
     """
     Sends a TRAFFIC_ALERT message to the multicast group.
-    Called when classification detects congestion or an incident is received.
+    All devices subscribed to MULTICAST_GROUP:MULTICAST_PORT receive it simultaneously.
     """
-    # TODO: implement
-    log.info(f"Sending TRAFFIC_ALERT via multicast → level={payload.get('level')}")
-    pass
+    message = _build_message("TRAFFIC_ALERT", payload)
+ 
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, config.MULTICAST_TTL)
+ 
+    try:
+        sock.sendto(message, (config.MULTICAST_GROUP, config.MULTICAST_PORT))
+        log.info(
+            f"TRAFFIC_ALERT multicast sent → "
+            f"type={payload.get('alert_type')}, "
+            f"level={payload.get('level')}, "
+            f"location={payload.get('location')}"
+        )
+    except Exception as e:
+        log.error(f"Multicast send error: {e}")
+    finally:
+        sock.close()
 
 # TCP Client → Cloud
 
@@ -213,20 +292,6 @@ def forward_to_cloud(events: list):
     log.info(f"Forwarding {len(events)} events to cloud server")
     pass
 
-# Traffic classification
-
-def classify_traffic(vehicle_count: int, avg_speed: float) -> str | None:
-    """
-    Applies traffic classification logic based on vehicle count and average speed.
-
-    Returns:
-        "high"   → severe congestion or incident
-        "medium" → slow/intense flow
-        None     → normal flow (no alert)
-    """
-    # TODO: implement classification table from config thresholds
-    pass
-
 
 def main():
     log.info("Smart Gateway starting...")
@@ -236,16 +301,17 @@ def main():
  
     tcp_thread = threading.Thread(target=start_tcp_server, daemon=True)
     tcp_thread.start()
-    # TODO: start periodic DATA_FORWARD loop
+    
+    classification_thread = threading.Thread(target=_classification_loop, daemon=True)
+    classification_thread.start()
 
     log.info("All servers running. Waiting for messages...")
-    udp_thread.join()
+
     try:
         while True:
             threading.Event().wait(1)
     except KeyboardInterrupt:
         log.info("Shutting down Smart Gateway...")
-
 
 if __name__ == "__main__":
     main()
