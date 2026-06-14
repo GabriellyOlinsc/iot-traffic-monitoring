@@ -4,6 +4,10 @@
 
 import sys
 import os
+import socket
+import struct
+import json
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from logger import get_logger
@@ -17,9 +21,22 @@ def join_multicast_group():
     Creates a UDP socket and joins the multicast group.
     Returns the socket ready to receive messages.
     """
-    # TODO: implement
     log.info(f"Joining multicast group {config.MULTICAST_GROUP}:{config.MULTICAST_PORT}")
-    pass
+    
+    # 1. Cria o socket UDP genérico para comunicação por datagramas
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    
+    # 2. Ativa o REUSEADDR para permitir que o painel e o semáforo escutem a mesma porta simultaneamente
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    
+    # 3. Vincula o socket à porta multicast definida no arquivo config pelas meninas
+    sock.bind(('', config.MULTICAST_PORT))
+    
+    # 4. Estrutura a requisição IGMP para se registrar no grupo IP Multicast
+    mreq = struct.pack("4sl", socket.inet_aton(config.MULTICAST_GROUP), socket.INADDR_ANY)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    
+    return sock
 
 
 def handle_alert(message: dict):
@@ -32,19 +49,56 @@ def handle_alert(message: dict):
         location:   str
         action:     str
     """
-    level      = message.get("payload", {}).get("level")
-    alert_type = message.get("payload", {}).get("alert_type")
-    location   = message.get("payload", {}).get("location")
+    payload = message.get("payload", {})
+    level      = payload.get("level")
+    alert_type = payload.get("alert_type")
+    location   = payload.get("location")
+    avg_speed  = payload.get("avg_speed_kmh", "N/A")
 
-    # TODO: implement display logic based on level
     log.warning(f"TRAFFIC_ALERT received → type={alert_type}, level={level}, location={location}")
-    pass
+    
+    # Implementação da lógica visual de exibição de texto baseada no nível do alerta
+    print("\n" + "="*55)
+    print(f" [PAINEL LED] EXIBIÇÃO EM: {location.upper()} ")
+    print("="*55)
+    
+    if level == "high":
+        print(f"  ALERTA CRÍTICO: {alert_type.upper()} DETECTADO! ")
+        print(f"  VELOCIDADE MÉDIA: {avg_speed} km/h ")
+        print("  --> [ MENSAGEM: TRÂNSITO PARADO. REDUZA A VELOCIDADE! ] ")
+    elif level == "medium":
+        print(f"  ATENÇÃO: FLUXO LENTO POR {alert_type.upper()} ")
+        print(f"  VELOCIDADE MÉDIA: {avg_speed} km/h ")
+        print("  --> [ MENSAGEM: TRÁFEGO INTENSO À FRENTE. CUIDADO. ] ")
+    else:
+        print("  CONDIÇÕES NORMAIS NA VIA ")
+        print("  --> [ MENSAGEM: BOA VIAGEM! DADOS DE FLUXO ESTÁVEIS. ] ")
+        
+    print("="*55 + "\n")
 
 
 def main():
     log.info("LED Panel actuator starting...")
-    # TODO: join multicast group, loop listening for TRAFFIC_ALERT
-    pass
+    
+    # Inicializa o socket e se inscreve no grupo multicast
+    sock = join_multicast_group()
+    
+    log.info("Loop de escuta multicast iniciado com sucesso.")
+    
+    # Loop de recebimento contínuo de pacotes
+    while True:
+        try:
+            data, addr = sock.recvfrom(4096)
+            message = json.loads(data.decode('utf-8'))
+            
+            # Garante que a mensagem recebida é do método correto mapeado
+            if message.get("method") == "TRAFFIC ALERT":
+                handle_alert(message)
+                
+        except json.JSONDecodeError:
+            log.error("Erro ao decodificar pacote JSON recebido no grupo Multicast.")
+        except Exception as e:
+            log.error(f"Erro inesperado no loop do Painel LED: {e}")
 
 
 if __name__ == "__main__":
