@@ -20,6 +20,7 @@ import config
 
 log = get_logger("Smart Gateway")
 
+# Estado compartilhado entre as threads
 _lock            = threading.Lock()
 _speed_readings  = []   # raw km/h values received in current window
 _vehicle_count   = 0    # latest count received from inductive loop
@@ -60,8 +61,11 @@ def _handle_speed_data(payload: dict):
 
   
 def start_udp_server():
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    """
+    UDP Server — listens on SG_UDP_PORT.
+    Runs in a dedicated thread (Thread 1).
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  #Cria socket UDP (SOCK_DGRAM = sem conexão, sem garantia de entrega)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((config.SG_HOST, config.SG_UDP_PORT))
     log.info(f"UDP server listening on {config.SG_HOST}:{config.SG_UDP_PORT}")
@@ -69,6 +73,7 @@ def start_udp_server():
     while True:
         try:
             data, addr = sock.recvfrom(config.UDP_BUFFER_SIZE)
+
             message = json.loads(data.decode("utf-8"))
             method  = message.get("method")
             payload = message.get("payload", {})
@@ -86,7 +91,7 @@ def start_udp_server():
             log.error(f"UDP server error: {e}")
  
  
-# TCP SERVER ------------------------------------------------------------
+# TCP SERVER  ------------------------------------------------------------
 
 def _send_ack(conn, ref_method: str):
     response = _build_message("ACK", {
@@ -100,7 +105,7 @@ def _send_ack(conn, ref_method: str):
 def _send_error(conn, ref_method: str, error_code: str, description: str):
     response = _build_message("ERROR", {
         "ref_method":  ref_method,
-        "error_code":  error_code,
+        "error_code":  error_code,   # ex: INVALID_PAYLOAD, UNKNOWN_DEVICE
         "description": description,
     })
     conn.sendall(response)
@@ -179,7 +184,11 @@ def handle_tcp_client(conn: socket.socket, addr):
  
  
 def start_tcp_server():
-
+    """
+    Multi-client TCP server, listens on SG_TCP_PORT.
+    Runs in a dedicated thread (Thread 2).
+    """
+    # Cria socket TCP (SOCK_STREAM = orientado a conexão, com garantia de entrega)
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((config.SG_HOST, config.SG_TCP_PORT))
@@ -189,6 +198,8 @@ def start_tcp_server():
     while True:
         try:
             conn, addr = sock.accept()
+
+            # Cria uma thread para atender um cliente sem bloquear os próximos
             client_thread = threading.Thread(
                 target=handle_tcp_client,
                 args=(conn, addr),
@@ -352,15 +363,19 @@ def _forward_loop():
 def main():
     log.info("Smart Gateway starting...")
 
+    # Thread 1 — UDP Server
     udp_thread = threading.Thread(target=start_udp_server, daemon=True)
     udp_thread.start()
  
+    # Thread 2 — TCP Server
     tcp_thread = threading.Thread(target=start_tcp_server, daemon=True)
     tcp_thread.start()
     
+    # Thread 3 — Classification
     classification_thread = threading.Thread(target=_classification_loop, daemon=True)
     classification_thread.start()
 
+    # Thread 4 — Forward
     forward_thread = threading.Thread(target=_forward_loop, daemon=True)
     forward_thread.start()
 
