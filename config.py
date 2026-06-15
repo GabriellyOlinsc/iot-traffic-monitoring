@@ -23,9 +23,9 @@ DEVICE_CLOUD_SERVER     = "cloud-server-001"
 
 # Simulation intervals 
 SENSOR_INTERVAL         = 30     # How often inductive loop sends VEHICLE_COUNT
-RADAR_INTERVAL          = 2      # How often radar sends a SPEED_DATA reading
+RADAR_INTERVAL          = 10     # How often radar sends a SPEED_DATA reading
 FORWARD_INTERVAL        = 60     # How often SG forwards data to cloud
-INCIDENT_INTERVAL       = 45     # How often incident sensor sends a report (simulation)
+INCIDENT_INTERVAL       = 60     # How often incident sensor sends a report (simulation)
 
 # Thresholds
 VEHICLE_COUNT_THRESHOLD = 20     # Max vehicles for "normal" flow

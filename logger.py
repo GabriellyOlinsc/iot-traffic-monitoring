@@ -1,13 +1,9 @@
-# =============================================================================
-# logger.py — Colored, prefixed logging for all devices
-# =============================================================================
 # Usage:
 #   from logger import get_logger
 #   log = get_logger("RADAR")
 #   log.info("Sending SPEED_DATA: 72 km/h")
 #   log.warning("No response from SG")
 #   log.error("Connection refused")
-# =============================================================================
 
 import logging
 import sys
@@ -16,10 +12,10 @@ import sys
 _COLORS = {
     "SMART GATEWAY":    "\033[96m",   # Cyan
     "CLOUD SERVER":     "\033[94m",   # Blue
-    "INDUCTIVE LOOP":   "\033[38;2;132;204;22m",   # Green
-    "RADAR":            "\033[38;2;168;85;247m",   # Yellow
-    "INCIDENT SENSOR":  "\033[38;2;223;142;29m",   # Red
-    "LED PANEL":        "\033[38;2;236;72;153m",   # Magenta
+    "INDUCTIVE LOOP":   "\033[92m",   # Green
+    "RADAR":            "\033[93m",   # Yellow
+    "INCIDENT SENSOR":  "\033[91m",   # Red
+    "LED PANEL":        "\033[95m",   # Magenta
     "TRAFFIC LIGHT":    "\033[33m",   # Orange-ish
     "RUN ALL":          "\033[97m",   # White
 }
@@ -83,10 +79,7 @@ def get_logger(device_name: str, level: int = logging.DEBUG) -> logging.Logger:
 
     return logger
 
-
-# =============================================================================
-# Quick demo — run this file directly to preview all device colors
-# =============================================================================
+# Quick demo — preview log
 if __name__ == "__main__":
     devices = [
         "Smart Gateway",
@@ -107,3 +100,25 @@ if __name__ == "__main__":
         log.warning(f"WARNING message from {name}")
         log.error(f"ERROR message from {name}")
         print()
+
+
+def format_msg(method: str, payload: dict) -> str:
+    """
+    Formats a log message in the standard protocol style:
+        METHOD → {"key": value, ...}
+
+    Usage:
+        from logger import get_logger, format_msg
+
+        log.debug(format_msg("SPEED_DATA", {"speed_kmh": 26.5, "location": "BR-101"}))
+        # → SPEED_DATA → {"speed_kmh": 26.5, "location": "BR-101"}
+
+        log.info(format_msg("VEHICLE_COUNT", {"count": 12, "interval": 30}))
+        # → VEHICLE_COUNT → {"count": 12, "interval": 30}
+
+        log.warning(format_msg("TRAFFIC_ALERT", {"level": "high", "alert_type": "incident"}))
+        # → TRAFFIC_ALERT → {"level": "high", "alert_type": "incident"}
+    """
+    import json
+    payload_str = json.dumps(payload, ensure_ascii=False)
+    return f"{method} → {payload_str}"
