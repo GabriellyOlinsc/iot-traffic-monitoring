@@ -59,11 +59,11 @@ def handle_alert(message: dict):
     
     # Implementação da lógica de reação baseada no nível (item 2.1 e 4.6 do PDF)
     if level == "high":
-        log.info(f"[REAÇÃO] Ação solicitada: {action}. Mudando semáforo para SINAL AMARELO INTERMITENTE / ATENÇÃO MÁXIMA devido a {alert_type}.")
+        log.info(f"Ação solicitada: {action}. Mudando semáforo para SINAL AMARELO INTERMITENTE / ATENÇÃO MÁXIMA devido a {alert_type}.")
     elif level == "medium":
-        log.info(f"[REAÇÃO] Ajustando temporizador! Reduzindo tempo de sinal verde na via afetada para desafogar o tráfego.")
+        log.info(f"Ajustando temporizador! Reduzindo tempo de sinal verde na via afetada para desafogar o tráfego.")
     else:
-        log.info(f"[REAÇÃO] Nível {level} estável. Mantendo o ciclo padrão de operação do semáforo.")
+        log.info(f"Nível {level} estável. Mantendo o ciclo padrão de operação do semáforo.")
 
 
 def main():
@@ -81,7 +81,7 @@ def main():
             message = json.loads(data.decode('utf-8'))
             
             # Valida se o método da mensagem recebida é de fato um alerta de tráfego
-            if message.get("method") == "TRAFFIC ALERT":
+            if message.get("method") == "TRAFFIC_ALERT":
                 handle_alert(message)
                 
         except json.JSONDecodeError:

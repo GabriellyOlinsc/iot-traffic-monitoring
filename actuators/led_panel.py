@@ -10,7 +10,7 @@ import json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from logger import get_logger
+from logger import get_logger, format_msg
 import config
 
 log = get_logger("LED Panel")
@@ -23,13 +23,13 @@ def join_multicast_group():
     """
     log.info(f"Joining multicast group {config.MULTICAST_GROUP}:{config.MULTICAST_PORT}")
     
-    # 1. Cria o socket UDP genérico para comunicação por datagramas
+    # Cria o socket UDP genérico para comunicação por datagramas
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     
-    # 2. Ativa o REUSEADDR para permitir que o painel e o semáforo escutem a mesma porta simultaneamente
+    # Ativa o REUSEADDR para permitir que o painel e o semáforo escutem a mesma porta simultaneamente
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     
-    # 3. Vincula o socket à porta multicast definida no arquivo config pelas meninas
+    # Vincula o socket à porta multicast definida no arquivo config pelas meninas
     sock.bind(('', config.MULTICAST_PORT))
     
     # 4. Estrutura a requisição IGMP para se registrar no grupo IP Multicast
@@ -91,8 +91,7 @@ def main():
             data, addr = sock.recvfrom(4096)
             message = json.loads(data.decode('utf-8'))
             
-            # Garante que a mensagem recebida é do método correto mapeado
-            if message.get("method") == "TRAFFIC ALERT":
+            if message.get("method") == "TRAFFIC_ALERT":
                 handle_alert(message)
                 
         except json.JSONDecodeError:

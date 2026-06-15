@@ -49,37 +49,26 @@ def send_incident_report(incident_type: str, severity: str, location: str):
     log.info(f"Sending INCIDENT_REPORT → type={incident_type}, severity={severity}, location={location}")
 
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.connect((config.SG_HOST, config.SG_TCP_PORT))
-            sock.sendall(json.dumps(message).encode("utf-8"))
-            log.debug(f"Message sent, waiting for response...")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect((config.SG_HOST, config.SG_TCP_PORT))
+        sock.sendall(json.dumps(message).encode("utf-8"))
+        
+        response_data = sock.recv(config.TCP_BUFFER_SIZE)
+        response = json.loads(response_data.decode("utf-8"))
+        method  = response.get("method")
+        payload = response.get("payload", {})
 
-            response_data = sock.recv(config.TCP_BUFFER_SIZE)
-            if not response_data:
-                log.error("No response received from Smart Gateway")
-                return
-
-            response = json.loads(response_data.decode("utf-8"))
-            method = response.get("method")
-            payload = response.get("payload", {})
-
-            if method == "ACK":
-                log.info(f"ACK received → status={payload.get('status')}, ref={payload.get('ref_method')}")
-            elif method == "ERROR":
-                log.error(
-                    f"ERROR received → code={payload.get('error_code')}, "
-                    f"description={payload.get('description')}"
-                )
-            else:
-                log.warning(f"Unexpected response method: {method}")
+        if method == "ACK":
+            log.info(f"ACK received → status={payload.get('status')}, ref={payload.get('ref_method')}")
+        elif method == "ERROR":
+            log.error(f"ERROR received → code={payload.get('error_code')}")
 
     except ConnectionRefusedError:
-        log.error(f"Connection refused — Smart Gateway not available at {config.SG_HOST}:{config.SG_TCP_PORT}")
-    except json.JSONDecodeError:
-        log.error("Invalid JSON received in response")
+        log.error(f"Connection refused — Smart Gateway not available")
     except Exception as e:
         log.error(f"Error sending INCIDENT_REPORT: {e}")
-
+    finally:
+        sock.close()
 
 def simulate_incident() -> dict:
     """
@@ -113,7 +102,6 @@ def main():
             severity=incident["severity"],
             location=incident["location"],
         )
-        log.debug(f"Next report in {config.INCIDENT_INTERVAL}s...")
         time.sleep(config.INCIDENT_INTERVAL)
 
 

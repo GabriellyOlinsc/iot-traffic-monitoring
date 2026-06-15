@@ -8,7 +8,7 @@ import time
 import random
 from datetime import datetime, UTC
 
-from logger import get_logger
+from logger import get_logger, format_msg
 import config
 
 log = get_logger("Inductive Loop")
@@ -30,7 +30,7 @@ def send_vehicle_count(count: int, location: str):
         },
     }
 
-    log.info(f"Sending VEHICLE_COUNT → count={count}, location={location}")
+    log.info(format_msg("VEHICLE_COUNT", {"count": count, "location": location}))
 
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -63,7 +63,6 @@ def main():
     while True:
         count = simulate_vehicle_count()
         send_vehicle_count(count=count, location=location)
-        log.debug(f"Next reading in {config.SENSOR_INTERVAL}s...")
         time.sleep(config.SENSOR_INTERVAL)
 
 

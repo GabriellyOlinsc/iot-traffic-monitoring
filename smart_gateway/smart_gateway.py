@@ -13,7 +13,7 @@ import socket
 import json
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 
 from logger import get_logger
 import config
@@ -26,7 +26,7 @@ _vehicle_count   = 0    # latest count received from inductive loop
 _events_buffer   = []   # all events received, flushed on DATA_FORWARD
  
 def _now() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def _build_message(method: str, payload: dict) -> bytes:
     msg = {
@@ -62,6 +62,7 @@ def _handle_speed_data(payload: dict):
 def start_udp_server():
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((config.SG_HOST, config.SG_UDP_PORT))
     log.info(f"UDP server listening on {config.SG_HOST}:{config.SG_UDP_PORT}")
  
@@ -168,6 +169,8 @@ def handle_tcp_client(conn: socket.socket, addr):
             _send_error(conn, method or "UNKNOWN", "INVALID_PAYLOAD",
                         f"Método não suportado via TCP: {method}")
  
+        time.sleep(5)
+        
     except Exception as e:
         log.error(f"TCP client handler error ({addr}): {e}")
     finally:
@@ -288,9 +291,62 @@ def forward_to_cloud(events: list):
     TCP client that sends a DATA_FORWARD message to the cloud server.
     Called periodically every FORWARD_INTERVAL seconds.
     """
-    # TODO: implement
-    log.info(f"Forwarding {len(events)} events to cloud server")
-    pass
+    message = _build_message("DATA_FORWARD", {
+        "period_s": config.FORWARD_INTERVAL,
+        "events":   events,
+    })
+ 
+    log.info(f"Forwarding {len(events)} events to cloud server ({config.CLOUD_HOST}:{config.CLOUD_TCP_PORT})")
+ 
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.connect((config.CLOUD_HOST, config.CLOUD_TCP_PORT))
+            sock.sendall(message)
+            log.debug("DATA_FORWARD sent, waiting for response...")
+ 
+            response_data = sock.recv(config.TCP_BUFFER_SIZE)
+            if not response_data:
+                log.error("No response received from cloud server")
+                return
+ 
+            response = json.loads(response_data.decode("utf-8"))
+            method  = response.get("method")
+            payload = response.get("payload", {})
+ 
+            if method == "ACK":
+                log.info(f"Cloud ACK received → status={payload.get('status')}, ref={payload.get('ref_method')}")
+            elif method == "ERROR":
+                log.error(
+                    f"Cloud ERROR received → code={payload.get('error_code')}, "
+                    f"description={payload.get('description')}"
+                )
+            else:
+                log.warning(f"Unexpected response from cloud: {method}")
+ 
+    except ConnectionRefusedError:
+        log.error(f"Cloud server not available at {config.CLOUD_HOST}:{config.CLOUD_TCP_PORT}")
+    except json.JSONDecodeError:
+        log.error("Invalid JSON received from cloud server")
+    except Exception as e:
+        log.error(f"Error forwarding to cloud: {e}")
+ 
+def _forward_loop():
+    """
+    Runs every FORWARD_INTERVAL seconds.
+    Flushes the events buffer and sends it to the cloud server via TCP.
+    """
+    while True:
+        time.sleep(config.FORWARD_INTERVAL)
+ 
+        with _lock:
+            events = list(_events_buffer)
+            _events_buffer.clear()
+ 
+        if not events:
+            log.info("Forward loop → no events to forward this period")
+            continue
+ 
+        forward_to_cloud(events)
 
 
 def main():
@@ -304,6 +360,9 @@ def main():
     
     classification_thread = threading.Thread(target=_classification_loop, daemon=True)
     classification_thread.start()
+
+    forward_thread = threading.Thread(target=_forward_loop, daemon=True)
+    forward_thread.start()
 
     log.info("All servers running. Waiting for messages...")
 

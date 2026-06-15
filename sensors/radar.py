@@ -8,7 +8,7 @@ import time
 import random
 from datetime import datetime, UTC
 
-from logger import get_logger
+from logger import get_logger, format_msg
 import config
 
 log = get_logger("Radar")
@@ -30,7 +30,8 @@ def send_speed_data(speed_kmh: float, location: str):
         },
     }
 
-    log.info(f"Sending SPEED_DATA → speed={speed_kmh:.1f} km/h, location={location}")
+    log.info(format_msg("SPEED_DATA", {"speed_kmh": round(speed_kmh, 1), "location": location}))
+
 
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -71,7 +72,6 @@ def main():
     while True:
         speed = simulate_speed()
         send_speed_data(speed_kmh=speed, location=location)
-        log.debug(f"Next reading in {config.RADAR_INTERVAL}s...")
         time.sleep(config.RADAR_INTERVAL)
 
 
