@@ -44,13 +44,15 @@ class _ColoredFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         level_color = _LEVEL_COLORS.get(record.levelname, "\033[0m")
 
+        timestamp = self.formatTime(record, datefmt="%Y-%m-%dT%H:%M:%S")
+
         # Fixed-width prefix: [DEVICE NAME]   ← padded to _PREFIX_WIDTH
         label  = f"[{self.device_name.upper()}]"
         prefix = f"{self.device_color}{label:<{_PREFIX_WIDTH}}{_RESET}"
 
         level_tag = f"{level_color}{record.levelname:<8}{_RESET}"
         message   = f"{level_color}{record.getMessage()}{_RESET}"
-        return f"{prefix} {level_tag} {message}"
+        return f"{timestamp}  {prefix} {level_tag} {message}"
 
 
 def get_logger(device_name: str, level: int = logging.DEBUG) -> logging.Logger:

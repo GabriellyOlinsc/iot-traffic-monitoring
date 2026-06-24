@@ -65,9 +65,9 @@ def start_udp_server():
     UDP Server — listens on SG_UDP_PORT.
     Runs in a dedicated thread (Thread 1).
     """
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  #Cria socket UDP (SOCK_DGRAM = sem conexão, sem garantia de entrega)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind((config.SG_HOST, config.SG_UDP_PORT))
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)      #Cria socket UDP (SOCK_DGRAM = sem conexão, sem garantia de entrega)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)   # permite reutilizar a porta apóes restart
+    sock.bind((config.SG_HOST, config.SG_UDP_PORT))              # associa o socket a porta configurada
     log.info(f"UDP server listening on {config.SG_HOST}:{config.SG_UDP_PORT}")
  
     while True:
@@ -174,7 +174,6 @@ def handle_tcp_client(conn: socket.socket, addr):
             _send_error(conn, method or "UNKNOWN", "INVALID_PAYLOAD",
                         f"Método não suportado via TCP: {method}")
  
-        time.sleep(5)
         
     except Exception as e:
         log.error(f"TCP client handler error ({addr}): {e}")
